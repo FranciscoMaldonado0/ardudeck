@@ -2682,6 +2682,38 @@ export function setupIpcHandlers(mainWindow: BrowserWindow): void {
       };
       sendConnectionState(mainWindow);
 
+      // UDP CLIENT FIX: Start sending GCS heartbeats immediately so the remote
+      // endpoint (e.g. mavlink-router) learns our return address and starts
+      // streaming telemetry back. Without this, both sides wait forever.
+      // This mimics Mission Planner's UDPCI behavior.
+      // The permanent heartbeat loop (started on vehicle heartbeat at ~line 1970)
+      // will take over once connection is established.
+      if (options.type === 'udp' && options.udpMode === 'client') {
+        const sendEarlyHeartbeat = async () => {
+          if (!currentTransport?.isOpen) return;
+          try {
+            const hbPayload = serializeHeartbeat({
+              type: 6,           // MAV_TYPE_GCS
+              autopilot: 8,      // MAV_AUTOPILOT_INVALID
+              baseMode: 0,
+              customMode: 0,
+              systemStatus: 4,   // MAV_STATE_ACTIVE
+              mavlinkVersion: 3,
+            });
+            const pkt = await sendMavlinkPacket(HEARTBEAT_ID, hbPayload, HEARTBEAT_CRC_EXTRA);
+            await currentTransport.write(pkt);
+          } catch {
+            // Non-critical
+          }
+        };
+
+        // Send first one immediately, then at 1Hz until the real loop takes over
+        sendEarlyHeartbeat();
+        if (gcsHeartbeatInterval) clearInterval(gcsHeartbeatInterval);
+        gcsHeartbeatInterval = setInterval(sendEarlyHeartbeat, 1000);
+        sendLog(mainWindow, 'info', 'UDP client mode: sending GCS heartbeats to establish return path');
+      }
+
       // Set heartbeat timeout - try MSP if no MAVLink heartbeat
       // Auto-detection strategy:
       //   Serial: always try MSP fallback (physical FC, safe to probe)
