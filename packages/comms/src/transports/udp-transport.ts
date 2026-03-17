@@ -67,7 +67,7 @@ export class UdpTransport extends BaseTransport {
         this.rxBuffer.push(uint8);
         this.emit('data', uint8);
 
-        // Auto-learn remote endpoint from first message
+        // Auto-learn remote endpoint from first message (listen mode)
         if (!this._remoteHost) {
           this._remoteHost = rinfo.address;
           this._remotePort = rinfo.port;
@@ -86,7 +86,13 @@ export class UdpTransport extends BaseTransport {
         this.emit('close');
       });
 
-      this.socket.bind(this._localPort, () => {
+      // Client mode: bind ephemeral port, just like MP's UdpSerialConnect
+      // Listen mode: bind the specified local port
+      const bindPort = (this._remoteHost && this._remotePort) ? 0 : this._localPort;
+
+      console.log(`Binding UDP socket to port ${bindPort}...`);
+
+      this.socket.bind(bindPort, () => {
         this._isOpen = true;
         this.emit('open');
         resolve();
